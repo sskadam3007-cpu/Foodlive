@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgis/postgis:15-3.3
+    container_name: foodlive_db
+    restart: always
+    environment:
+      POSTGRES_DB: ${DB_NAME:-foodlive_db}
+      POSTGRES_USER: ${DB_USER:-foodlive_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-supersecretpassword}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - foodlive_net
+
+  backend:
+    build:
+      context: ./backend
+    container_name: foodlive_api
+    restart: always
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             gunicorn foodlive.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+    volumes:
+      - ./backend:/app
+      - static_volume:/app/staticfiles
+      - media_volume:/app/mediafiles
+    expose:
+      - 8000
+    env_file:
+      - .env
+    depends_on:
+      - db
+    networks:
+      - foodlive_net
+
+  nginx:
+    build:
+      context: ./nginx
+    container_name: foodlive_nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - static_volume:/app/staticfiles:ro
+      - media_volume:/app/mediafiles:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
+    depends_on:
+      - backend
+    networks:
+      - foodlive_net
+
+volumes:
+  postgres_data:
+  static_volume:
+  media_volume:
+
+networks:
+  foodlive_net:
+    driver: bridge
